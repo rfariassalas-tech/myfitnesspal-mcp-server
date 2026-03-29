@@ -319,24 +319,24 @@ def get_mfp_client():
             last_error = e
             logger.warning(f"Stored cookie authentication failed: {e}")
     
-    # Method 3: Try browser cookies (default behavior)
-    logger.info("Attempting authentication with browser cookies")
-    try:
-        client = myfitnesspal.Client()
-        # Test the connection
-        _ = client.get_date(date.today())
-        logger.info("Successfully authenticated with browser cookies")
-        return client
-    except Exception as e:
-        last_error = e
-        raise RuntimeError(
-            f"All authentication methods failed. Last error: {str(last_error)}\n\n"
-            "Please try one of these solutions:\n"
-            "1. Set MFP_USERNAME and MFP_PASSWORD environment variables in Claude Desktop config\n"
-            "2. Log into myfitnesspal.com in Chrome or Firefox\n"
-            "3. Check ~/.mfp_mcp/cookies.json for stored session"
-        )
+# Method 3: Try browser cookies only in local desktop environments
+if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("PORT"):
+    raise RuntimeError(
+        f"All authentication methods failed before browser-cookie fallback. "
+        f"Last error: {str(last_error)}"
+    )
 
+logger.info("Attempting authentication with browser cookies")
+try:
+    client = myfitnesspal.Client()
+    _ = client.get_date(date.today())
+    logger.info("Successfully authenticated with browser cookies")
+    return client
+except Exception as e:
+    last_error = e
+    raise RuntimeError(
+        f"All authentication methods failed. Last error: {str(last_error)}"
+    )
 
 # ============================================================================
 # Data Formatting Helper Functions
