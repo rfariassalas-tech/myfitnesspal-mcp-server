@@ -27,6 +27,8 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
+from mcp.server.transport_security import TransportSecuritySettings
+
 # Configure logging to stderr (required for stdio transport)
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +38,23 @@ logging.basicConfig(
 logger = logging.getLogger("mfp_mcp")
 
 # Initialize MCP server
-mcp = FastMCP("myfitnesspal_mcp")
+#mcp = FastMCP("myfitnesspal_mcp")
+mcp = FastMCP(
+    "myfitnesspal_mcp",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "127.0.0.1:*",
+            "localhost:*",
+            "myfitnesspal-mcp-server-production.up.railway.app",
+        ],
+        allowed_origins=[
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "https://myfitnesspal-mcp-server-production.up.railway.app",
+        ],
+    ),
+)
 
 # Configuration paths
 CONFIG_DIR = Path.home() / ".mfp_mcp"
