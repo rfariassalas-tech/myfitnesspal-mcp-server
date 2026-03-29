@@ -154,70 +154,92 @@ def dict_to_cookiejar(cookies_dict: Dict[str, str], domain: str = ".myfitnesspal
 
 def authenticate_with_credentials(username: str, password: str) -> Dict[str, str]:
     """
-    Authenticate with MyFitnessPal using username/password.
-    
+    Authenticate with MyFitnessPal using username/password via the modern auth flow.
+
     Args:
         username: MyFitnessPal username or email
         password: MyFitnessPal password
-    
+
     Returns:
         Dictionary of session cookies
-        
+
     Raises:
         RuntimeError: If authentication fails
     """
-    # Log authentication attempt without exposing the username
     logger.info("Authenticating with credentials")
-    
-    # MyFitnessPal login URL and endpoints
-    LOGIN_URL = "https://www.myfitnesspal.com/account/login"
-    
+
+    BASE_URL = "https://www.myfitnesspal.com"
+    CSRF_URL = f"{BASE_URL}/api/auth/csrf"
+    LOGIN_URL = f"{BASE_URL}/api/auth/callback/credentials"
+    AUTH_TEST_URL = f"{BASE_URL}/user/auth_token?refresh=true"
+
     try:
-        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
-            # First, get the login page to obtain CSRF token
-            response = client.get(LOGIN_URL)
-            response.raise_for_status()
-            
-            # Extract CSRF token from cookies or page
-            cookies = dict(response.cookies)
-            
-            # Attempt login
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=30.0,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/account/login",
+            },
+        ) as client:
+            # 1) Get CSRF token
+            csrf_response = client.get(CSRF_URL)
+            csrf_response.raise_for_status()
+
+            csrf_json = csrf_response.json()
+            csrf_token = csrf_json.get("csrfToken")
+            if not csrf_token:
+                raise RuntimeError("Could not obtain CSRF token")
+
+            # 2) Submit credentials using NextAuth-style callback
             login_data = {
                 "username": username,
                 "password": password,
+                "csrfToken": csrf_token,
+                "callbackUrl": f"{BASE_URL}/",
+                "json": "true",
             }
-            
-            # Try the standard form login
+
             login_response = client.post(
                 LOGIN_URL,
                 data=login_data,
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": LOGIN_URL,
+                    "X-Auth-Return-Redirect": "1",
+                    "Referer": f"{BASE_URL}/account/login",
+                    "Origin": BASE_URL,
                 },
             )
-            
-            # Check if login was successful by looking for session cookies
-            all_cookies = dict(client.cookies)
-            
-            # MFP uses various session cookie names
-            session_indicators = ["user", "session", "auth", "logged_in"]
-            has_session = any(
-                any(indicator in name.lower() for indicator in session_indicators)
-                for name in all_cookies.keys()
+            login_response.raise_for_status()
+
+            # 3) Verify authenticated session using the same signal the library expects
+            auth_test = client.get(
+                AUTH_TEST_URL,
+                headers={
+                    "Accept": "application/json",
+                    "Referer": f"{BASE_URL}/",
+                },
             )
-            
-            if has_session or len(all_cookies) > len(cookies):
-                logger.info("Successfully authenticated with credentials")
-                return all_cookies
-            else:
-                # Try to check if we can access authenticated content
-                test_response = client.get("https://www.myfitnesspal.com/food/diary")
-                if test_response.status_code == 200 and "login" not in str(test_response.url).lower():
-                    return dict(client.cookies)
-                    
-                raise RuntimeError("Login appeared to fail - no session cookies received")
-                
+            auth_test.raise_for_status()
+
+            if not auth_test.headers.get("Content-Type", "").startswith("application/json"):
+                raise RuntimeError(
+                    "Login response completed but auth token endpoint did not return JSON"
+                )
+
+            all_cookies = dict(client.cookies)
+            if not all_cookies:
+                raise RuntimeError("Authentication succeeded but no cookies were stored")
+
+            logger.info("Successfully authenticated with credentials")
+            return all_cookies
+
     except httpx.HTTPError as e:
         raise RuntimeError(f"HTTP error during authentication: {e}")
     except Exception as e:
