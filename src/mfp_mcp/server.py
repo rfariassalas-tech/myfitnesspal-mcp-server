@@ -218,6 +218,10 @@ def authenticate_with_credentials(username: str, password: str) -> Dict[str, str
             )
             login_response.raise_for_status()
 
+logger.info(f"Login response headers: {dict(login_response.headers)}")
+logger.info(f"Login response body: {login_response.text[:1000]}")
+logger.info(f"Cookies after login: {dict(client.cookies)}")
+
             # 3) Verify authenticated session using the same signal the library expects
             auth_test = client.get(
                 AUTH_TEST_URL,
